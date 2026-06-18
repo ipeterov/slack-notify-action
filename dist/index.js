@@ -67271,6 +67271,25 @@ function overallColor(watched) {
 // switch to 1 field per job so up to 10 jobs still fit one gap-free section.
 const MAX_TWO_FIELD_JOBS = 5;
 const MAX_FIELDS = 10;
+// Slack fills a section's `fields` row-major (left cell, right cell, next row).
+// We want each column read top-to-bottom instead, so we reorder: the first
+// half of the items become the left column, the rest the right column, then we
+// interleave them back into the row-major order Slack expects. For an odd
+// count the extra item lands in the left column and the last row has no right
+// cell.
+//   in:  [A, B, C, D, E, F]  →  left [A,B,C] right [D,E,F]  →  out [A,D,B,E,C,F]
+function columnMajor(items) {
+    const rows = Math.ceil(items.length / 2);
+    const left = items.slice(0, rows);
+    const right = items.slice(rows);
+    const out = [];
+    for (let i = 0; i < rows; i += 1) {
+        out.push(left[i]);
+        if (i < right.length)
+            out.push(right[i]);
+    }
+    return out;
+}
 function jobListBlocks(watched, runUrl, layout) {
     // Count-driven default: clearest layout that fits.
     if (layout === "auto") {
@@ -67311,7 +67330,8 @@ function jobListBlocks(watched, runUrl, layout) {
         });
         const blocks = [];
         for (let i = 0; i < fields.length; i += MAX_FIELDS) {
-            blocks.push({ type: "section", fields: fields.slice(i, i + MAX_FIELDS) });
+            const section = fields.slice(i, i + MAX_FIELDS);
+            blocks.push({ type: "section", fields: columnMajor(section) });
         }
         return blocks;
     }

@@ -139,6 +139,20 @@ describe("renderCard (Slack Block Kit)", () => {
     assert.equal((sections[0]!["fields"] as unknown[]).length, 6); // 6 × 1
   });
 
+  it("columns layout fills column-major (A D / B E / C F), not row-major", () => {
+    const labels = ["A", "B", "C", "D", "E", "F"];
+    const jobs = labels.map((l) => watched([fakeJob()], l));
+    const card = renderCard(jobs, fakeRun(), "o/r");
+    const section = card.blocks.find((b) => b["type"] === "section")!;
+    const order = (section["fields"] as Array<{ text: string }>).map((f) =>
+      // pull the bold label out of `:emoji: *Label* · …`
+      f.text.replace(/^[^*]*\*([^*]+)\*.*$/, "$1"),
+    );
+    // Slack lays these row-major, so to read A,B,C down the left column and
+    // D,E,F down the right, the field array must be A,D,B,E,C,F.
+    assert.deepEqual(order, ["A", "D", "B", "E", "C", "F"]);
+  });
+
   it("auto layout: >10 jobs chunk into multiple columns sections", () => {
     const jobs = Array.from({ length: 11 }, (_, i) =>
       watched([fakeJob()], `Job ${i}`),
