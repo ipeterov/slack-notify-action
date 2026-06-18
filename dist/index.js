@@ -67162,6 +67162,13 @@ function latestCompletion(rows) {
 function link(url, text) {
     return `<${url}|${escapeText(text)}>`;
 }
+// Slack's localized relative time, the analog of Discord's `<t:unix:R>`.
+// `{ago}` renders as "3 minutes ago", localized per viewer. Unlike Discord it
+// doesn't auto-tick, but the action re-renders on every poll while jobs run, so
+// the value refreshes until everything reaches a terminal state.
+function slackAgo(unix, fallback) {
+    return `<!date^${unix}^{ago}|${escapeText(fallback)}>`;
+}
 // Slack mrkdwn requires &, <, > to be HTML-escaped in any text we emit. We
 // also drop `|` from link text since it terminates the link's text segment.
 function escapeText(text) {
@@ -67170,19 +67177,19 @@ function escapeText(text) {
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;");
 }
-function jobLine(w, runUrl) {
+// A rendered job: the emoji + bold label headline, and the dim detail line
+// shown beneath it. Mirrors the Discord card's two-line-per-job layout.
+function jobParts(w, runUrl) {
     if (w.rows.length === 0) {
-        return `${MISSING_EMOJI} *${escapeText(w.label)}*  ·  waiting`;
+        return { emoji: MISSING_EMOJI, detail: "waiting" };
     }
     if (w.rows.length === 1 && !w.multi) {
         const r = w.rows[0];
-        const emoji = pickEmoji(r.status, r.conclusion);
         const url = r.html_url ?? runUrl;
-        return `${emoji} *${escapeText(w.label)}*  ·  ${rowDetail(r, url)}`;
+        return { emoji: pickEmoji(r.status, r.conclusion), detail: rowDetail(r, url) };
     }
     // Collapsed multi-row (matrix or reusable workflow).
     const agg = aggregateState(w.rows);
-    const emoji = pickEmoji(agg.status, agg.conclusion);
     const done = w.rows.filter((r) => r.status === "completed").length;
     const failed = w.rows.filter((r) => r.status === "completed" && r.conclusion === "failure").length;
     const total = w.rows.length;
@@ -67196,7 +67203,10 @@ function jobLine(w, runUrl) {
     else {
         summary = `${total} combos`;
     }
-    return `${emoji} *${escapeText(w.label)}*  ·  ${matrixDetail(w.rows, summary, runUrl)}`;
+    return {
+        emoji: pickEmoji(agg.status, agg.conclusion),
+        detail: matrixDetail(w.rows, summary, runUrl),
+    };
 }
 function rowDetail(job, url) {
     const bits = [];
@@ -67211,7 +67221,7 @@ function rowDetail(job, url) {
     else {
         bits.push(humanStatus(job.status));
     }
-    bits.push(link(url, "logs ↗"));
+    bits.push(link(url, "logs ↗︎"));
     return bits.join("  ·  ");
 }
 function matrixDetail(rows, summary, runUrl) {
@@ -67224,7 +67234,7 @@ function matrixDetail(rows, summary, runUrl) {
             bits.push(formatDuration(latest - earliest));
         }
     }
-    bits.push(link(runUrl, "logs ↗"));
+    bits.push(link(runUrl, "logs ↗︎"));
     return bits.join("  ·  ");
 }
 function humanStatus(status) {
@@ -67250,23 +67260,115 @@ function overallColor(watched) {
     }
     return COLOR_RUNNING;
 }
-function renderCard(watched, run, repo, monitoringError) {
+function jobListBlocks(watched, runUrl, layout) {
+    if (layout === "fields") {
+        // section `fields`: a 2-column grid, max 10 items → 5 job rows. Left cell
+        // is `emoji *Label*`, right cell is the detail. Emoji render inline-small.
+        const fields = watched.flatMap((w) => {
+            const { emoji, detail } = jobParts(w, runUrl);
+            return [
+                { type: "mrkdwn", text: `${emoji} *${escapeText(w.label)}*` },
+                { type: "mrkdwn", text: detail },
+            ];
+        });
+        // section.fields caps at 10 entries (5 rows); overflow rows fall back to a
+        // context line so nothing is silently dropped.
+        const head = fields.slice(0, 10);
+        const blocks = [{ type: "section", fields: head }];
+        if (fields.length > 10) {
+            const rest = watched.slice(5).map((w) => {
+                const { emoji, detail } = jobParts(w, runUrl);
+                return `${emoji} *${escapeText(w.label)}* ${detail}`;
+            });
+            blocks.push({
+                type: "context",
+                elements: [{ type: "mrkdwn", text: rest.join("      ") }],
+            });
+        }
+        return blocks;
+    }
+    if (layout === "richlist") {
+        // rich_text_list: a true bulleted list, one job per bullet, emoji inline.
+        const elements = watched.map((w) => {
+            const { emoji, detail } = jobParts(w, runUrl);
+            return {
+                type: "rich_text_section",
+                elements: [
+                    { type: "text", text: `${emoji} `, style: {} },
+                    { type: "text", text: w.label, style: { bold: true } },
+                    { type: "text", text: `  —  ${stripMrkdwn(detail)}` },
+                ],
+            };
+        });
+        return [
+            {
+                type: "rich_text",
+                elements: [{ type: "rich_text_list", style: "bullet", elements }],
+            },
+        ];
+    }
+    if (layout === "table") {
+        // table block: real columns. Header row + one row per job.
+        const header = ["", "Job", "Status", "Logs"].map((t) => ({
+            type: "raw_text",
+            text: t,
+        }));
+        const rows = [header];
+        for (const w of watched) {
+            const { emoji, detail } = jobParts(w, runUrl);
+            rows.push([
+                { type: "raw_text", text: emoji },
+                { type: "raw_text", text: w.label },
+                { type: "raw_text", text: stripMrkdwn(detail.split("  ·  ")[0] ?? "") },
+                { type: "raw_text", text: "logs" },
+            ]);
+        }
+        return [{ type: "table", rows }];
+    }
+    // Default "context": single compact line, emoji inline-small, no collapse.
+    const jobText = watched
+        .map((w) => {
+        const { emoji, detail } = jobParts(w, runUrl);
+        return `${emoji} *${escapeText(w.label)}* ${detail}`;
+    })
+        .join("      ");
+    return [{ type: "context", elements: [{ type: "mrkdwn", text: jobText }] }];
+}
+// Strip mrkdwn link syntax `<url|text>` → `text` for contexts (rich_text/table
+// cells) that take plain strings rather than mrkdwn.
+function stripMrkdwn(s) {
+    return s.replace(/<([^|>]+)\|([^>]+)>/g, "$2");
+}
+function renderCard(watched, run, repo, monitoringError, layout = "fields") {
     const sha = (run.head_sha ?? "").slice(0, 7);
     const branch = run.head_branch ?? "?";
     const repoShort = repo.split("/").pop() ?? repo;
     const subject = run.head_commit?.message?.split("\n")[0] ?? "";
     const author = run.head_commit?.author?.name ?? run.triggering_actor?.login ?? null;
     const attemptSuffix = run.run_attempt > 1 ? ` (attempt ${run.run_attempt})` : "";
-    const headline = `[${repoShort}:${branch}] CI · run #${run.run_number}${attemptSuffix}`;
+    // Big bold title (header block). Plain text only — the run link rides on the
+    // `View run` line just below, and on each job's `logs`.
+    const headline = `CI · run #${run.run_number}${attemptSuffix}`;
+    // Used for the notification fallback and nowhere visible.
+    const fallback = `[${repoShort}:${branch}] ${headline}`;
     const blocks = [];
-    // Header line: linked run title. mrkdwn section, not a `header` block, since
-    // header blocks are plain_text and can't carry the run link.
+    // Title as a real `header` block so it reads as a card title (large + bold),
+    // not a faint hyperlink. header blocks are plain_text, so the run link goes
+    // on the context line below.
     blocks.push({
-        type: "section",
-        text: {
-            type: "mrkdwn",
-            text: link(run.html_url, headline),
-        },
+        type: "header",
+        text: { type: "plain_text", text: headline, emoji: true },
+    });
+    // Repo · branch · started-ago · "View run" line, just under the title inside
+    // the colored card. mrkdwn so the run link and relative-time token work.
+    const startedAt = earliestStart(watched.flatMap((w) => w.rows));
+    const subBits = [`*${escapeText(repoShort)}*:${escapeText(branch)}`];
+    if (startedAt !== null)
+        subBits.push(`started ${slackAgo(startedAt, "recently")}`);
+    subBits.push(link(run.html_url, "View run ↗︎"));
+    blocks.push({
+        type: "context",
+        elements: [{ type: "mrkdwn", text: subBits.join("  ·  ") }],
     });
     if (monitoringError) {
         blocks.push({
@@ -67278,14 +67380,8 @@ function renderCard(watched, run, repo, monitoringError) {
             },
         });
     }
-    // Per-job status list as a single mrkdwn section (one line per watched job).
-    blocks.push({
-        type: "section",
-        text: {
-            type: "mrkdwn",
-            text: watched.map((w) => jobLine(w, run.html_url)).join("\n"),
-        },
-    });
+    for (const b of jobListBlocks(watched, run.html_url, layout))
+        blocks.push(b);
     // Context block: GitHub favicon + repo, plus commit/author when available.
     const contextBits = [`*${escapeText(repo)}*`];
     const metaBits = [sha, author, subject].filter((b) => !!b && b.length > 0);
@@ -67301,7 +67397,7 @@ function renderCard(watched, run, repo, monitoringError) {
     return {
         blocks,
         color: monitoringError ? COLOR_ERROR : overallColor(watched),
-        fallback: headline,
+        fallback,
     };
 }
 
@@ -67363,11 +67459,12 @@ class SlackClient {
     // `<!channel>`/`<!here>`, so commit/job text can't ping the channel.
     payload(card) {
         return {
-            // Fallback text for notifications/accessibility; not rendered in-channel.
-            text: card.fallback,
             attachments: [
                 {
                     color: card.color,
+                    // `fallback` is notification/accessibility text only — unlike the
+                    // message-level `text`, it is never rendered above the card.
+                    fallback: card.fallback,
                     blocks: card.blocks,
                 },
             ],
