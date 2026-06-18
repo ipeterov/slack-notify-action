@@ -99,6 +99,26 @@ describe("renderCard (Slack Block Kit)", () => {
     assert.equal(card.color, "#e5534b");
   });
 
+  it("uses GitHub's run number in the title by default", () => {
+    const card = renderCard([watched([fakeJob()])], fakeRun(), "o/r");
+    assert.ok(card.fallback.includes("run #42"));
+    assert.ok(allText(card.blocks).includes("run #42"));
+  });
+
+  it("overrides the title with a caller-supplied build number", () => {
+    const card = renderCard(
+      [watched([fakeJob()])],
+      fakeRun(),
+      "o/r",
+      false,
+      "fields",
+      "6128",
+    );
+    const text = allText(card.blocks);
+    assert.ok(text.includes("build #6128"));
+    assert.ok(!text.includes("run #42"));
+  });
+
   it("shows a monitoring-stopped notice and error color", () => {
     const card = renderCard([watched([fakeJob()])], fakeRun(), "o/r", true);
     assert.equal(card.color, "#8957e5");

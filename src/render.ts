@@ -361,6 +361,7 @@ export function renderCard(
   repo: string,
   monitoringError?: boolean,
   layout: Layout = "fields",
+  buildNumber?: string,
 ): Card {
   const sha = (run.head_sha ?? "").slice(0, 7);
   const branch = run.head_branch ?? "?";
@@ -372,8 +373,13 @@ export function renderCard(
   const attemptSuffix =
     run.run_attempt > 1 ? ` (attempt ${run.run_attempt})` : "";
   // Big bold title (header block). Plain text only — the run link rides on the
-  // `View run` line just below, and on each job's `logs`.
-  const headline = `CI · run #${run.run_number}${attemptSuffix}`;
+  // `View run` line just below, and on each job's `logs`. A caller-supplied
+  // `build_number` overrides GitHub's run number (labelled `build #` rather
+  // than `run #`); otherwise we fall back to the run number.
+  const numberPart = buildNumber
+    ? `build #${buildNumber}`
+    : `run #${run.run_number}`;
+  const headline = `CI · ${numberPart}${attemptSuffix}`;
   // Used for the notification fallback and nowhere visible.
   const fallback = `[${repoShort}:${branch}] ${headline}`;
 

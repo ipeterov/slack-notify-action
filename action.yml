@@ -21,6 +21,13 @@ inputs:
           - tests
           - deploy
     required: true
+  build_number:
+    description: |
+      Your own build number to show in the card title (e.g. `build #6128`).
+      Use this when GitHub's run number isn't the number you track — for
+      example when an offset is applied after renaming a workflow. When unset,
+      the card falls back to GitHub's run number (`run #<run_number>`).
+    required: false
   github-token:
     description: |
       GitHub token used to read the workflow run and its jobs. Defaults to the

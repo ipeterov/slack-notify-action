@@ -66814,6 +66814,9 @@ async function main() {
     const channel = core.getInput("channel_id", { required: true });
     const jobsInput = core.getInput("jobs", { required: true });
     const watchedIds = (0, inputs_js_1.parseJobsInput)(jobsInput);
+    // Optional caller-supplied build number for the card title. Empty → fall back
+    // to GitHub's run number inside renderCard.
+    const buildNumber = core.getInput("build_number").trim() || undefined;
     const token = core.getInput("github-token") || process.env.GITHUB_TOKEN || "";
     // Read the bot token from the environment exactly as ivelum does, so swapping
     // actions needs no Slack-admin or secret changes.
@@ -66839,8 +66842,11 @@ async function main() {
         const meta = (0, workflow_js_1.parseWorkflow)(workflowYaml);
         validateIds(watchedIds, meta);
         warnDynamicNames(watchedIds, meta);
+        // Bind the build-number override (and the default layout) once so the poll
+        // loop's render calls stay terse.
+        const render = (w, r, monitoringError) => (0, render_js_1.renderCard)(w, r, repo, monitoringError, "fields", buildNumber);
         const watched = buildWatched(watchedIds, meta, jobs);
-        const card = (0, render_js_1.renderCard)(watched, run, repo);
+        const card = render(watched, run);
         const ts = await slack.post(card);
         let lastPayload = JSON.stringify(card);
         let lastRun = run;
@@ -66864,7 +66870,7 @@ async function main() {
                 // the card freeze at its last state, mark it as broken and stop.
                 const msg = err instanceof Error ? err.message : String(err);
                 core.error(`Notify Slack: GitHub polling failed: ${msg}`);
-                const errCard = (0, render_js_1.renderCard)(watched, lastRun, repo, true);
+                const errCard = render(watched, lastRun, true);
                 try {
                     await slack.update(ts, errCard);
                 }
@@ -66875,7 +66881,7 @@ async function main() {
                 return;
             }
             const nextWatched = buildWatched(watchedIds, meta, nextJobs);
-            const nextCard = (0, render_js_1.renderCard)(nextWatched, nextRun, repo);
+            const nextCard = render(nextWatched, nextRun);
             const nextPayload = JSON.stringify(nextCard);
             if (nextPayload !== lastPayload) {
                 await slack.update(ts, nextCard);
@@ -67339,7 +67345,7 @@ function jobListBlocks(watched, runUrl, layout) {
 function stripMrkdwn(s) {
     return s.replace(/<([^|>]+)\|([^>]+)>/g, "$2");
 }
-function renderCard(watched, run, repo, monitoringError, layout = "fields") {
+function renderCard(watched, run, repo, monitoringError, layout = "fields", buildNumber) {
     const sha = (run.head_sha ?? "").slice(0, 7);
     const branch = run.head_branch ?? "?";
     const repoShort = repo.split("/").pop() ?? repo;
@@ -67347,8 +67353,13 @@ function renderCard(watched, run, repo, monitoringError, layout = "fields") {
     const author = run.head_commit?.author?.name ?? run.triggering_actor?.login ?? null;
     const attemptSuffix = run.run_attempt > 1 ? ` (attempt ${run.run_attempt})` : "";
     // Big bold title (header block). Plain text only — the run link rides on the
-    // `View run` line just below, and on each job's `logs`.
-    const headline = `CI · run #${run.run_number}${attemptSuffix}`;
+    // `View run` line just below, and on each job's `logs`. A caller-supplied
+    // `build_number` overrides GitHub's run number (labelled `build #` rather
+    // than `run #`); otherwise we fall back to the run number.
+    const numberPart = buildNumber
+        ? `build #${buildNumber}`
+        : `run #${run.run_number}`;
+    const headline = `CI · ${numberPart}${attemptSuffix}`;
     // Used for the notification fallback and nowhere visible.
     const fallback = `[${repoShort}:${branch}] ${headline}`;
     const blocks = [];

@@ -2,11 +2,11 @@ import * as core from "@actions/core";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { GitHubClient } from "./github.js";
-import type { Job } from "./github.js";
+import type { Job, Run } from "./github.js";
 import { parseJobsInput } from "./inputs.js";
 import { matchJobs } from "./match.js";
 import { allRowsTerminal, failedWatched, renderCard } from "./render.js";
-import type { WatchedJob } from "./render.js";
+import type { Card, WatchedJob } from "./render.js";
 import { SlackClient } from "./slack.js";
 import { parseWorkflow } from "./workflow.js";
 import type { JobMeta } from "./workflow.js";
@@ -18,6 +18,9 @@ async function main(): Promise<void> {
   const channel = core.getInput("channel_id", { required: true });
   const jobsInput = core.getInput("jobs", { required: true });
   const watchedIds = parseJobsInput(jobsInput);
+  // Optional caller-supplied build number for the card title. Empty → fall back
+  // to GitHub's run number inside renderCard.
+  const buildNumber = core.getInput("build_number").trim() || undefined;
   const token =
     core.getInput("github-token") || process.env.GITHUB_TOKEN || "";
 
@@ -56,8 +59,13 @@ async function main(): Promise<void> {
     validateIds(watchedIds, meta);
     warnDynamicNames(watchedIds, meta);
 
+    // Bind the build-number override (and the default layout) once so the poll
+    // loop's render calls stay terse.
+    const render = (w: WatchedJob[], r: Run, monitoringError?: boolean): Card =>
+      renderCard(w, r, repo, monitoringError, "fields", buildNumber);
+
     const watched = buildWatched(watchedIds, meta, jobs);
-    const card = renderCard(watched, run, repo);
+    const card = render(watched, run);
     const ts = await slack.post(card);
 
     let lastPayload = JSON.stringify(card);
@@ -83,7 +91,7 @@ async function main(): Promise<void> {
         // the card freeze at its last state, mark it as broken and stop.
         const msg = err instanceof Error ? err.message : String(err);
         core.error(`Notify Slack: GitHub polling failed: ${msg}`);
-        const errCard = renderCard(watched, lastRun, repo, true);
+        const errCard = render(watched, lastRun, true);
         try {
           await slack.update(ts, errCard);
         } catch {
@@ -94,7 +102,7 @@ async function main(): Promise<void> {
       }
 
       const nextWatched = buildWatched(watchedIds, meta, nextJobs);
-      const nextCard = renderCard(nextWatched, nextRun, repo);
+      const nextCard = render(nextWatched, nextRun);
       const nextPayload = JSON.stringify(nextCard);
       if (nextPayload !== lastPayload) {
         await slack.update(ts, nextCard);
