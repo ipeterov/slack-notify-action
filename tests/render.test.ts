@@ -8,6 +8,7 @@ import type { WatchedJob } from "../src/render.js";
 function fakeRun(overrides: Partial<Run> = {}): Run {
   return {
     id: 1,
+    name: "CI",
     run_number: 42,
     run_attempt: 1,
     html_url: "https://github.com/o/r/actions/runs/1",
@@ -50,6 +51,69 @@ describe("renderCard (Slack Block Kit)", () => {
     assert.equal(card.color, "#57ab5a"); // all-success
     assert.ok(Array.isArray(card.blocks) && card.blocks.length > 0);
     assert.ok(card.fallback.includes("run #42"));
+  });
+
+  it("title carries repo, workflow name, and build/run number", () => {
+    const card = renderCard([watched([fakeJob()])], fakeRun({ name: "Deploy" }), "octo/repo");
+    const header = card.blocks.find((b) => b["type"] === "header")!;
+    const title = (header["text"] as { text: string }).text;
+    assert.ok(title.includes("repo")); // repoShort, for multi-repo channels
+    assert.ok(title.includes("Deploy")); // real workflow name, not hardcoded CI
+    assert.ok(title.includes("run #42"));
+  });
+
+  it("freezes runtime once all watched jobs are terminal", () => {
+    // completed job: 00:00:00 → 00:01:30 = 1m 30s, regardless of `now`.
+    const card = renderCard([watched([fakeJob()])], fakeRun(), "o/r");
+    const title = (
+      card.blocks.find((b) => b["type"] === "header")!["text"] as { text: string }
+    ).text;
+    assert.ok(title.includes("1m 30s"), title);
+  });
+
+  it("ticks live elapsed time while a watched job is in progress", () => {
+    // Started just now, not yet complete → runtime = now − start, which keeps
+    // advancing on each poll/update rather than freezing.
+    const startedAt = new Date(Date.now() - 65_000).toISOString(); // 65s ago
+    const job = fakeJob({
+      status: "in_progress",
+      conclusion: null,
+      started_at: startedAt,
+      completed_at: null,
+    });
+    const card = renderCard([watched([job])], fakeRun(), "o/r");
+    const title = (
+      card.blocks.find((b) => b["type"] === "header")!["text"] as { text: string }
+    ).text;
+    assert.ok(/· 1m/.test(title), title); // ~1m elapsed and counting
+  });
+
+  it("shows `running` before any watched job has started", () => {
+    // Queued job: no started_at yet → no measurable runtime → `running`.
+    const job = fakeJob({
+      status: "queued",
+      conclusion: null,
+      started_at: null,
+      completed_at: null,
+    });
+    const card = renderCard([watched([job])], fakeRun(), "o/r");
+    const title = (
+      card.blocks.find((b) => b["type"] === "header")!["text"] as { text: string }
+    ).text;
+    assert.ok(title.includes("running"), title);
+  });
+
+  it("footer pairs the card to the push: author · subject · run link, no logo", () => {
+    const card = renderCard([watched([fakeJob()])], fakeRun(), "o/r");
+    // The footer is the last context block.
+    const contexts = card.blocks.filter((b) => b["type"] === "context");
+    const footer = contexts[contexts.length - 1]!;
+    const els = footer["elements"] as Array<{ type: string; text?: string }>;
+    assert.ok(!els.some((e) => e.type === "image")); // logo dropped
+    const text = els.map((e) => e.text ?? "").join(" ");
+    assert.ok(text.includes("Octo Cat")); // author
+    assert.ok(text.includes("fix the build")); // subject
+    assert.ok(text.includes("<https://github.com/o/r/actions/runs/1|")); // run link
   });
 
   it("uses mrkdwn link syntax <url|text>, not Markdown [text](url)", () => {

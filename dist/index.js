@@ -67079,8 +67079,6 @@ const COLOR_SUCCESS = "#57ab5a";
 const COLOR_FAILURE = "#e5534b";
 const COLOR_CANCELLED = "#9198a1";
 const COLOR_ERROR = "#8957e5";
-// 16x16 GitHub favicon, used in the context block.
-const GITHUB_ICON = "https://github.githubassets.com/favicons/favicon.png";
 function pickEmoji(status, conclusion) {
     if (!status)
         return MISSING_EMOJI;
@@ -67163,17 +67161,30 @@ function latestCompletion(rows) {
     }
     return latest;
 }
+// Wall-clock runtime of the *watched* jobs. We can't use GitHub's run duration:
+// our notify job is itself part of the run, so the run is never "finished"
+// while we're polling. We measure across the jobs we watch instead.
+//   start = earliest watched start (immune to our own scheduling delay)
+//   end   = latest watched completion once all watched jobs are terminal
+//           (frozen), otherwise `now` — which advances on each poll/update so
+//           the value ticks live while the pipeline runs.
+function workflowRuntime(watched) {
+    const rows = watched.flatMap((w) => w.rows);
+    const start = earliestStart(rows);
+    if (start === null)
+        return null;
+    const allTerminal = watched.length > 0 && watched.every((w) => allRowsTerminal(w));
+    const end = allTerminal
+        ? latestCompletion(rows)
+        : Math.floor(Date.now() / 1000);
+    if (end === null || end < start)
+        return null;
+    return formatDuration(end - start);
+}
 // Slack mrkdwn link: <url|text>. Escapes the text so a stray `>`/`<`/`&` or
 // a `|` in the label can't break out of the link syntax.
 function link(url, text) {
     return `<${url}|${escapeText(text)}>`;
-}
-// Slack's localized relative time, the analog of Discord's `<t:unix:R>`.
-// `{ago}` renders as "3 minutes ago", localized per viewer. Unlike Discord it
-// doesn't auto-tick, but the action re-renders on every poll while jobs run, so
-// the value refreshes until everything reaches a terminal state.
-function slackAgo(unix, fallback) {
-    return `<!date^${unix}^{ago}|${escapeText(fallback)}>`;
 }
 // Slack mrkdwn requires &, <, > to be HTML-escaped in any text we emit. We
 // also drop `|` from link text since it terminates the link's text segment.
@@ -67388,40 +67399,30 @@ function stripMrkdwn(s) {
     return s.replace(/<([^|>]+)\|([^>]+)>/g, "$2");
 }
 function renderCard(watched, run, repo, monitoringError, layout = "auto", buildNumber) {
-    const sha = (run.head_sha ?? "").slice(0, 7);
     const branch = run.head_branch ?? "?";
     const repoShort = repo.split("/").pop() ?? repo;
     const subject = run.head_commit?.message?.split("\n")[0] ?? "";
     const author = run.head_commit?.author?.name ?? run.triggering_actor?.login ?? null;
     const attemptSuffix = run.run_attempt > 1 ? ` (attempt ${run.run_attempt})` : "";
-    // Big bold title (header block). Plain text only — the run link rides on the
-    // `View run` line just below, and on each job's `logs`. A caller-supplied
-    // `build_number` overrides GitHub's run number (labelled `build #` rather
-    // than `run #`); otherwise we fall back to the run number.
+    // A caller-supplied `build_number` overrides GitHub's run number (labelled
+    // `build #` rather than `run #`); otherwise we fall back to the run number.
     const numberPart = buildNumber
         ? `build #${buildNumber}`
         : `run #${run.run_number}`;
-    const headline = `CI · ${numberPart}${attemptSuffix}`;
+    // Title carries everything you scan for: which repo, which workflow, which
+    // build, and how long it took. Repo + workflow disambiguate cards from
+    // different repos/workflows sharing one channel. Runtime ticks while running
+    // (see workflowRuntime) and freezes at the final value once watched jobs end.
+    const workflow = run.name?.trim() || "CI";
+    const runtime = workflowRuntime(watched) ?? "running";
+    const headline = `${repoShort} · ${workflow} · ${numberPart}${attemptSuffix} · ${runtime}`;
     // Used for the notification fallback and nowhere visible.
-    const fallback = `[${repoShort}:${branch}] ${headline}`;
+    const fallback = `[${repoShort}:${branch}] ${workflow} ${numberPart}`;
     const blocks = [];
-    // Title as a real `header` block so it reads as a card title (large + bold),
-    // not a faint hyperlink. header blocks are plain_text, so the run link goes
-    // on the context line below.
+    // Title as a real `header` block so it reads as a card title (large + bold).
     blocks.push({
         type: "header",
         text: { type: "plain_text", text: headline, emoji: true },
-    });
-    // Repo · branch · started-ago · "View run" line, just under the title inside
-    // the colored card. mrkdwn so the run link and relative-time token work.
-    const startedAt = earliestStart(watched.flatMap((w) => w.rows));
-    const subBits = [`*${escapeText(repoShort)}*:${escapeText(branch)}`];
-    if (startedAt !== null)
-        subBits.push(`started ${slackAgo(startedAt, "recently")}`);
-    subBits.push(link(run.html_url, "View run ↗︎"));
-    blocks.push({
-        type: "context",
-        elements: [{ type: "mrkdwn", text: subBits.join("  ·  ") }],
     });
     if (monitoringError) {
         blocks.push({
@@ -67435,17 +67436,16 @@ function renderCard(watched, run, repo, monitoringError, layout = "auto", buildN
     }
     for (const b of jobListBlocks(watched, run.html_url, layout))
         blocks.push(b);
-    // Context block: GitHub favicon + repo, plus commit/author when available.
-    const contextBits = [`*${escapeText(repo)}*`];
-    const metaBits = [sha, author, subject].filter((b) => !!b && b.length > 0);
-    if (metaBits.length > 0)
-        contextBits.push(escapeText(metaBits.join(" · ")));
+    // Footer: who pushed + commit subject (to pair this card with GitHub's push
+    // notification when several land in the channel at once), plus the run link.
+    // No GitHub logo — it's dim and near-invisible in dark mode, doing no work.
+    const footerBits = [author, subject]
+        .filter((b) => !!b && b.length > 0)
+        .map(escapeText);
+    footerBits.push(link(run.html_url, "View run ↗︎"));
     blocks.push({
         type: "context",
-        elements: [
-            { type: "image", image_url: GITHUB_ICON, alt_text: "GitHub" },
-            { type: "mrkdwn", text: contextBits.join("  ·  ") },
-        ],
+        elements: [{ type: "mrkdwn", text: footerBits.join("  ·  ") }],
     });
     return {
         blocks,

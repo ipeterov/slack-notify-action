@@ -13,6 +13,7 @@ function backoffMs(attempt: number): number {
 
 export interface Run {
   id: number;
+  name: string | null;
   run_number: number;
   run_attempt: number;
   html_url: string;
