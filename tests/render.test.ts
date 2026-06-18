@@ -119,6 +119,40 @@ describe("renderCard (Slack Block Kit)", () => {
     assert.ok(!text.includes("run #42"));
   });
 
+  it("auto layout: ≤5 jobs use one section, 2 fields per job", () => {
+    const jobs = Array.from({ length: 5 }, (_, i) =>
+      watched([fakeJob()], `Job ${i}`),
+    );
+    const card = renderCard(jobs, fakeRun(), "o/r");
+    const sections = card.blocks.filter((b) => b["type"] === "section");
+    assert.equal(sections.length, 1);
+    assert.equal((sections[0]!["fields"] as unknown[]).length, 10); // 5 × 2
+  });
+
+  it("auto layout: 6–10 jobs use one columns section, 1 field per job", () => {
+    const jobs = Array.from({ length: 6 }, (_, i) =>
+      watched([fakeJob()], `Job ${i}`),
+    );
+    const card = renderCard(jobs, fakeRun(), "o/r");
+    const sections = card.blocks.filter((b) => b["type"] === "section");
+    assert.equal(sections.length, 1); // no inter-section gap
+    assert.equal((sections[0]!["fields"] as unknown[]).length, 6); // 6 × 1
+  });
+
+  it("auto layout: >10 jobs chunk into multiple columns sections", () => {
+    const jobs = Array.from({ length: 11 }, (_, i) =>
+      watched([fakeJob()], `Job ${i}`),
+    );
+    const card = renderCard(jobs, fakeRun(), "o/r");
+    const sections = card.blocks.filter((b) => b["type"] === "section");
+    assert.equal(sections.length, 2); // 10 + 1
+    const total = sections.reduce(
+      (n, s) => n + (s["fields"] as unknown[]).length,
+      0,
+    );
+    assert.equal(total, 11);
+  });
+
   it("shows a monitoring-stopped notice and error color", () => {
     const card = renderCard([watched([fakeJob()])], fakeRun(), "o/r", true);
     assert.equal(card.color, "#8957e5");

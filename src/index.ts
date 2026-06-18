@@ -62,7 +62,7 @@ async function main(): Promise<void> {
     // Bind the build-number override (and the default layout) once so the poll
     // loop's render calls stay terse.
     const render = (w: WatchedJob[], r: Run, monitoringError?: boolean): Card =>
-      renderCard(w, r, repo, monitoringError, "fields", buildNumber);
+      renderCard(w, r, repo, monitoringError, "auto", buildNumber);
 
     const watched = buildWatched(watchedIds, meta, jobs);
     const card = render(watched, run);

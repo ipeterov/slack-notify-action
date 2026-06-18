@@ -265,36 +265,69 @@ function overallColor(watched: WatchedJob[]): string {
 
 // Job-list layout variants under evaluation. "context" is the shipping default;
 // the others are candidates we're comparing visually in scripts/layouts.ts.
-export type Layout = "context" | "fields" | "richlist" | "table";
+// "auto" (the default) picks by job count; the rest are explicit variants kept
+// for the comparison scripts.
+export type Layout =
+  | "auto"
+  | "fields"
+  | "columns"
+  | "context"
+  | "richlist"
+  | "table";
+
+// A section's `fields` array caps at 10 entries. With ≤5 jobs we spend 2 fields
+// per job (label | detail) for the clearest two-column read; above that we
+// switch to 1 field per job so up to 10 jobs still fit one gap-free section.
+const MAX_TWO_FIELD_JOBS = 5;
+const MAX_FIELDS = 10;
 
 function jobListBlocks(
   watched: WatchedJob[],
   runUrl: string,
   layout: Layout,
 ): Block[] {
+  // Count-driven default: clearest layout that fits.
+  if (layout === "auto") {
+    layout = watched.length <= MAX_TWO_FIELD_JOBS ? "fields" : "columns";
+  }
+
   if (layout === "fields") {
-    // section `fields`: a 2-column grid, max 10 items → 5 job rows. Left cell
-    // is `emoji *Label*`, right cell is the detail. Emoji render inline-small.
-    const fields = watched.flatMap((w) => {
+    // 2 fields per job (`emoji *Label*` | detail) — clearest two-column grid.
+    // One section holds 5 jobs (10 fields); beyond that we chunk into more
+    // sections (which adds a visible gap, so `auto` only uses this for ≤5).
+    const fieldPairs = watched.map((w) => {
       const { emoji, detail } = jobParts(w, runUrl);
       return [
         { type: "mrkdwn", text: `${emoji} *${escapeText(w.label)}*` },
         { type: "mrkdwn", text: detail },
       ];
     });
-    // section.fields caps at 10 entries (5 rows); overflow rows fall back to a
-    // context line so nothing is silently dropped.
-    const head = fields.slice(0, 10);
-    const blocks: Block[] = [{ type: "section", fields: head }];
-    if (fields.length > 10) {
-      const rest = watched.slice(5).map((w) => {
-        const { emoji, detail } = jobParts(w, runUrl);
-        return `${emoji} *${escapeText(w.label)}* ${detail}`;
-      });
+    const blocks: Block[] = [];
+    for (let i = 0; i < fieldPairs.length; i += MAX_TWO_FIELD_JOBS) {
       blocks.push({
-        type: "context",
-        elements: [{ type: "mrkdwn", text: rest.join("      ") }],
+        type: "section",
+        fields: fieldPairs.slice(i, i + MAX_TWO_FIELD_JOBS).flat(),
       });
+    }
+    return blocks;
+  }
+
+  if (layout === "columns") {
+    // 1 field per job: `emoji *Label* · detail` in a single cell. Slack lays
+    // fields out in two columns, so jobs flow into a compact 2-column grid with
+    // no inter-section gap. One section fits 10 jobs; past that we chunk into
+    // further 10-job sections (gap reappears, but it's the best option at that
+    // size).
+    const fields = watched.map((w) => {
+      const { emoji, detail } = jobParts(w, runUrl);
+      return {
+        type: "mrkdwn",
+        text: `${emoji} *${escapeText(w.label)}*  ·  ${detail}`,
+      };
+    });
+    const blocks: Block[] = [];
+    for (let i = 0; i < fields.length; i += MAX_FIELDS) {
+      blocks.push({ type: "section", fields: fields.slice(i, i + MAX_FIELDS) });
     }
     return blocks;
   }
@@ -360,7 +393,7 @@ export function renderCard(
   run: Run,
   repo: string,
   monitoringError?: boolean,
-  layout: Layout = "fields",
+  layout: Layout = "auto",
   buildNumber?: string,
 ): Card {
   const sha = (run.head_sha ?? "").slice(0, 7);

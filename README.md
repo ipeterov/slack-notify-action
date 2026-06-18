@@ -123,6 +123,22 @@ Matrix jobs and reusable-workflow jobs are collapsed into one row per job id,
 with a `N/M done` summary. The card stays compact regardless of how many
 combinations the matrix expands into.
 
+## Card layout
+
+The card adapts its job list to the number of watched jobs, picking the
+clearest layout that fits Slack's block constraints (a section's `fields`
+array caps at 10 entries):
+
+- **Up to 5 jobs** — a two-column grid with the job name and its status/details
+  in separate columns.
+- **6 to 10 jobs** — a more compact two-column grid, one cell per job, so the
+  whole list still fits a single block with no visual gap.
+- **More than 10 jobs** — the compact grid continues across additional blocks.
+  A faint gap appears between blocks at this size; it's the trade-off for
+  keeping every job visible.
+
+You don't configure this — it's chosen automatically from the `jobs:` count.
+
 ## Migrating from `ivelum/github-action-slack-notify-build`
 
 This action is a **zero-setup credential swap** for existing ivelum users:
