@@ -1,0 +1,24 @@
+{
+  "name": "slack-notify-action",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Live-updating Slack card with per-job statuses for a GitHub Actions workflow run.",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "ncc build src/index.ts -o dist --target es2022",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/**/*.test.ts"
+  },
+  "dependencies": {
+    "@actions/core": "^1.11.1",
+    "js-yaml": "^4.1.0",
+    "undici": "^7.1.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.10.0",
+    "@vercel/ncc": "^0.38.3",
+    "tsx": "^4.22.0",
+    "typescript": "^5.7.2"
+  }
+}

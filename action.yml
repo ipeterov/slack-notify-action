@@ -1,0 +1,32 @@
+name: Slack Notify
+description: Post and live-update a Slack card with per-job statuses for this workflow run.
+branding:
+  icon: message-circle
+  color: green
+inputs:
+  channel_id:
+    description: |
+      Slack channel ID (e.g. `C0123456789`) to post the card in. Channel names
+      are not supported — resolving a name needs scopes beyond `chat:write`.
+      The bot must be invited to the channel.
+    required: true
+  jobs:
+    description: |
+      Job ids to watch, in the same form `needs:` accepts.
+      Examples:
+        jobs: linters
+        jobs: [linters, tests, deploy]
+        jobs: |
+          - linters
+          - tests
+          - deploy
+    required: true
+  github-token:
+    description: |
+      GitHub token used to read the workflow run and its jobs. Defaults to the
+      job's `github.token`, which only needs `actions: read` permission.
+    required: false
+    default: ${{ github.token }}
+runs:
+  using: node24
+  main: dist/index.js

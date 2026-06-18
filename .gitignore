@@ -1,0 +1,8 @@
+node_modules/
+*.log
+.DS_Store
+.idea
+# Local secrets for scripts/ preview harnesses — never commit
+.env
+# Throwaway visual-preview harnesses, kept locally for re-testing the card
+scripts/
