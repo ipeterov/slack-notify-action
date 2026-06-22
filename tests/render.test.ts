@@ -219,8 +219,8 @@ describe("renderCard (Slack Block Kit)", () => {
       ],
     });
     const card = renderCard([watched([job], "Deploy")], fakeRun(), "o/r");
-    // Counter (proportional) sits outside the monospace pill: (2/2) `name`.
-    assert.ok(allText(card.blocks).includes("(2/2) `Monitor rolling update`"));
+    // Counter (proportional, parens-free) sits outside the monospace pill.
+    assert.ok(allText(card.blocks).includes("2/2 `Monitor rolling update`"));
   });
 
   it("detailed: shows the failed step beside a failed job", () => {
@@ -232,12 +232,12 @@ describe("renderCard (Slack Block Kit)", () => {
       ],
     });
     const card = renderCard([watched([job], "Tests")], fakeRun(), "o/r");
-    assert.ok(allText(card.blocks).includes("(2/2) `Run npx playwright test`"));
+    assert.ok(allText(card.blocks).includes("2/2 `Run npx playwright test`"));
   });
 
   it("detailed: counter uses step.number, so teardown gaps stay monotonic", () => {
     // Real GitHub numbering: work steps 1–7, then teardown jumps to 13–15.
-    // A running teardown must read (13/15), never past-the-end.
+    // A running teardown must read 13/15, never past-the-end.
     const job = fakeJob({
       status: "in_progress",
       conclusion: null,
@@ -249,7 +249,7 @@ describe("renderCard (Slack Block Kit)", () => {
       ],
     });
     const card = renderCard([watched([job], "Tests")], fakeRun(), "o/r");
-    assert.ok(allText(card.blocks).includes("(13/15) `Post Run actions/checkout`"));
+    assert.ok(allText(card.blocks).includes("13/15 `Post Run actions/checkout`"));
   });
 
   it("shows the conclusion word for a skipped job, not `done`", () => {
@@ -278,16 +278,23 @@ describe("renderCard (Slack Block Kit)", () => {
     assert.ok(allText(card.blocks).includes("cancelled"));
   });
 
-  it("matrix collapse counts combinations as N jobs (GitHub's wording)", () => {
+  it("matrix collapse: count goes to col2, runtime to col1; reads N jobs", () => {
     const rows = [
       fakeJob({ name: "Tests (3.11)" }),
       fakeJob({ name: "Tests (3.12)" }),
       fakeJob({ name: "Tests (3.13)" }),
     ];
     const card = renderCard([watched(rows, "Tests", true)], fakeRun(), "o/r");
-    const text = allText(card.blocks);
-    assert.ok(text.includes("3 jobs"));
-    assert.ok(!text.includes("combos"));
+    const fields = card.blocks
+      .filter((b) => b["type"] === "section")
+      .flatMap((b) => b["fields"] as Array<{ text: string }>)
+      .map((f) => f.text);
+    const [col1, col2] = fields; // 1 matrix job → exactly one field pair
+    assert.ok(!allText(card.blocks).includes("combos"));
+    // Count lives in col2 (was wrapping col1 before); runtime stays in col1.
+    assert.equal(col2, "3 jobs done");
+    assert.ok(col1!.includes("1m 30s")); // fakeJob default duration
+    assert.ok(!col1!.includes("jobs")); // count no longer crowds col1
   });
 
   it("matrix runtime freezes at earliest-start → latest-finish when done", () => {
@@ -343,7 +350,7 @@ describe("renderCard (Slack Block Kit)", () => {
       ],
     });
     const card = renderCard([watched([job], "Build")], fakeRun(), "o/r");
-    assert.ok(allText(card.blocks).includes("(2/2) `Run build`"));
+    assert.ok(allText(card.blocks).includes("2/2 `Run build`"));
   });
 
   it("detailed: truncates a long step name to the no-wrap budget, keeping max text", () => {
@@ -358,12 +365,12 @@ describe("renderCard (Slack Block Kit)", () => {
       ],
     });
     const card = renderCard([watched([job], "Build")], fakeRun(), "o/r");
-    // Name truncated to 29 chars (28 + "…") inside the pill; counter outside.
+    // Name truncated to 30 chars (29 + "…") inside the pill; counter outside.
     // Assert the full expected string so we catch any change to what we keep.
-    const expectedName = longName.slice(0, 28) + "…"; // 29 chars
-    assert.equal(expectedName.length, 29);
+    const expectedName = longName.slice(0, 29) + "…"; // 30 chars
+    assert.equal(expectedName.length, 30);
     assert.ok(
-      allText(card.blocks).includes(`(2/2) \`${expectedName}\``),
+      allText(card.blocks).includes(`2/2 \`${expectedName}\``),
       allText(card.blocks),
     );
   });

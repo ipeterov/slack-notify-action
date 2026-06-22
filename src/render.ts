@@ -231,10 +231,10 @@ function escapeText(text: string): string {
 // Widest a col2 monospace step name can be before it wraps to a second line in
 // the detailed layout's right `fields` cell. The counter sits *outside* the
 // monospace pill as proportional text, so the budget is what's left behind the
-// widest realistic counter (`(99/99) `, since jobs effectively never exceed 99
-// steps). Found empirically (monospace → stable char count): 29 fits, 30 wraps.
-// The ellipsis counts toward it, so a truncated name is 28 chars + "…".
-const STEP_CHAR_BUDGET = 29;
+// widest realistic counter (`99/99 `, since jobs effectively never exceed 99
+// steps). Found empirically (monospace → stable char count): 30 fits, 31 wraps.
+// The ellipsis counts toward it, so a truncated name is 29 chars + "…".
+const STEP_CHAR_BUDGET = 30;
 
 // Truncate to `max` characters, with a single-char "…" as the last char when
 // cut (so the result is never longer than `max`).
@@ -268,8 +268,9 @@ function stepCell(s: { counter: string | null; name: string }): string {
 //
 // While a job is still spinning up, GitHub reports just one step ("Set up job",
 // which is where it expands the matrix and resolves the real step list). A
-// `(1/1)` counter is misleading — it'll jump to `(2/37)` the moment the rest
-// materialize — so counter is null when there's only one step.
+// `1/1` counter is misleading — it'll jump to `2/37` the moment the rest
+// materialize — so counter is null when there's only one step. The counter is
+// parens-free (`2/37`) to match the matrix combo count (`1/2 jobs done`).
 function currentStep(job: Job): { counter: string | null; name: string } | null {
   const steps = job.steps;
   if (!steps || steps.length === 0) return null;
@@ -283,7 +284,7 @@ function currentStep(job: Job): { counter: string | null; name: string } | null 
   if (!step) return null;
 
   const total = Math.max(...steps.map((s) => s.number));
-  const counter = total <= 1 ? null : `(${step.number}/${total})`;
+  const counter = total <= 1 ? null : `${step.number}/${total}`;
   return { counter, name: step.name };
 }
 
@@ -317,29 +318,33 @@ function detailedCol1(w: WatchedJob, runUrl: string): { emoji: string; text: str
     };
   }
 
-  // Matrix/reusable: collapse the rows into one summary line. GitHub calls each
-  // matrix combination a "job" ("the workflow will run six jobs, one for each
-  // combination"), so we count "N jobs". The name links to the run.
+  // Matrix/reusable: col1 mirrors a single job — `name · runtime`. The combo
+  // count goes to col2 (see matrixCount), keeping col1 short enough not to wrap.
+  // Wall-clock runtime ticks while combos run and freezes at
+  // earliest-start→latest-finish — i.e. how long the whole matrix blocked
+  // downstream jobs.
   const agg = aggregateState(w.rows);
-  const done = w.rows.filter((r) => r.status === "completed").length;
-  const failed = w.rows.filter(
+  const runtime = rowsRuntime(w.rows);
+  const text = runtime
+    ? `${link(runUrl, w.label)}  ·  ${runtime}`
+    : link(runUrl, w.label);
+  return { emoji: pickEmoji(agg.status, agg.conclusion), text };
+}
+
+// Col2 for a collapsed matrix: the combination count. GitHub calls each matrix
+// combination a "job" ("the workflow will run six jobs, one for each
+// combination"), so we count "N jobs". Mirrors a single job's step cell — it's
+// the "what's happening" detail for the right column.
+function matrixCount(rows: Job[]): string {
+  const done = rows.filter((r) => r.status === "completed").length;
+  const failed = rows.filter(
     (r) => r.status === "completed" && r.conclusion === "failure",
   ).length;
-  const total = w.rows.length;
+  const total = rows.length;
   const noun = total === 1 ? "job" : "jobs";
-  let count: string;
-  if (failed > 0) count = `${done}/${total} ${noun} done, ${failed} failed`;
-  else if (done < total) count = `${done}/${total} ${noun} done`;
-  else count = `${total} ${noun}`;
-  // Wall-clock runtime, just like a single job: ticks while combos run, freezes
-  // at earliest-start→latest-finish once all are done — i.e. how long the whole
-  // matrix blocked downstream jobs.
-  const runtime = rowsRuntime(w.rows);
-  const summary = runtime ? `${count}  ·  ${runtime}` : count;
-  return {
-    emoji: pickEmoji(agg.status, agg.conclusion),
-    text: `${link(runUrl, w.label)}  ·  ${summary}`,
-  };
+  if (failed > 0) return `${done}/${total} ${noun} done, ${failed} failed`;
+  if (done < total) return `${done}/${total} ${noun} done`;
+  return `${total} ${noun} done`;
 }
 
 function humanStatus(status: string | null): string {
@@ -414,14 +419,21 @@ function jobListBlocks(
   }
 
   // "detailed" (default): 2 fields per job — col1 `emoji *Job → logs* · timer`,
-  // col2 the current/failed step. 5 jobs per section; beyond that we chunk into
-  // further sections to stay under Slack's 10-field cap.
+  // col2 the detail (a single job's current/failed step, or a matrix's combo
+  // count). 5 jobs per section; beyond that we chunk into further sections to
+  // stay under Slack's 10-field cap.
   const fieldPairs = watched.map((w) => {
     const { emoji, text } = detailedCol1(w, runUrl);
-    const step = w.rows.length === 1 && !w.multi ? currentStep(w.rows[0]!) : null;
+    let col2 = " ";
+    if (w.rows.length === 1 && !w.multi) {
+      const step = currentStep(w.rows[0]!);
+      if (step) col2 = stepCell(step);
+    } else if (w.rows.length > 0) {
+      col2 = matrixCount(w.rows);
+    }
     return [
       { type: "mrkdwn", text: `${emoji} ${text}` },
-      { type: "mrkdwn", text: step ? stepCell(step) : " " },
+      { type: "mrkdwn", text: col2 },
     ];
   });
   const blocks: Block[] = [];
