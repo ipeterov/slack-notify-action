@@ -228,24 +228,49 @@ function escapeText(text: string): string {
     .replace(/>/g, "&gt;");
 }
 
-// The step worth surfacing for a single-row job, prefixed with a position
-// counter `(x/y)`:
+// Widest a col2 monospace step name can be before it wraps to a second line in
+// the detailed layout's right `fields` cell. The counter sits *outside* the
+// monospace pill as proportional text, so the budget is what's left behind the
+// widest realistic counter (`(99/99) `, since jobs effectively never exceed 99
+// steps). Found empirically (monospace → stable char count): 29 fits, 30 wraps.
+// The ellipsis counts toward it, so a truncated name is 28 chars + "…".
+const STEP_CHAR_BUDGET = 29;
+
+// Truncate to `max` characters, with a single-char "…" as the last char when
+// cut (so the result is never longer than `max`).
+function truncate(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return text.slice(0, max - 1) + "…";
+}
+
+// Render a col2 cell: the proportional counter prefix (if any) followed by the
+// monospace step name. The name is truncated to the no-wrap budget, has its
+// backticks stripped (they'd terminate the code span), and is mrkdwn-escaped.
+// Monospace makes the name's budget a real, stable width; keeping the counter
+// out of the pill avoids the digits looking cramped in code styling.
+function stepCell(s: { counter: string | null; name: string }): string {
+  const name = truncate(s.name, STEP_CHAR_BUDGET).replace(/`/g, "");
+  const mono = `\`${escapeText(name)}\``;
+  return s.counter ? `${s.counter} ${mono}` : mono;
+}
+
+// The step worth surfacing for a single-row job, with a position counter:
 //   - failed job   → the step that failed (what broke)
 //   - running job  → the step currently executing (what's happening now)
 // Returns null when there's no steps array, no matching step, or the job is in
 // any other state (done/queued — a step line would just be noise there).
-// x/y use GitHub's own `step.number` (x = the surfaced step's number, y = the
-// highest step number on the job). GitHub's auto-injected teardown steps get
-// high numbers, so the counter stays monotonic — a running teardown reads
-// `(13/15)`, never "past the end" the way an array-position counter would after
-// it already showed the last real step. We show the step name verbatim,
-// including GitHub's auto `Run <cmd>` label for unnamed steps.
+// The counter `(x/y)` uses GitHub's own `step.number` (x = the surfaced step's
+// number, y = the highest step number on the job). GitHub's auto-injected
+// teardown steps get high numbers, so the counter stays monotonic — a running
+// teardown reads `(13/15)`, never "past the end" the way an array-position
+// counter would after it already showed the last real step. The name is the
+// step name verbatim, including GitHub's auto `Run <cmd>` label.
 //
 // While a job is still spinning up, GitHub reports just one step ("Set up job",
 // which is where it expands the matrix and resolves the real step list). A
-// `(1/1) Set up job` counter is misleading — it'll jump to `(2/37)` the moment
-// the rest materialize — so we omit the counter when there's only one step.
-function currentStep(job: Job): string | null {
+// `(1/1)` counter is misleading — it'll jump to `(2/37)` the moment the rest
+// materialize — so counter is null when there's only one step.
+function currentStep(job: Job): { counter: string | null; name: string } | null {
   const steps = job.steps;
   if (!steps || steps.length === 0) return null;
 
@@ -258,8 +283,8 @@ function currentStep(job: Job): string | null {
   if (!step) return null;
 
   const total = Math.max(...steps.map((s) => s.number));
-  if (total <= 1) return step.name;
-  return `(${step.number}/${total}) ${step.name}`;
+  const counter = total <= 1 ? null : `(${step.number}/${total})`;
+  return { counter, name: step.name };
 }
 
 // Detailed layout, col1: `<emoji> <bold job name → logs link> · <status/timer>`.
@@ -396,7 +421,7 @@ function jobListBlocks(
     const step = w.rows.length === 1 && !w.multi ? currentStep(w.rows[0]!) : null;
     return [
       { type: "mrkdwn", text: `${emoji} ${text}` },
-      { type: "mrkdwn", text: step ? escapeText(step) : " " },
+      { type: "mrkdwn", text: step ? stepCell(step) : " " },
     ];
   });
   const blocks: Block[] = [];

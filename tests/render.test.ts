@@ -219,8 +219,8 @@ describe("renderCard (Slack Block Kit)", () => {
       ],
     });
     const card = renderCard([watched([job], "Deploy")], fakeRun(), "o/r");
-    // Counter uses step.number / max(step.number): (2/2) here.
-    assert.ok(allText(card.blocks).includes("(2/2) Monitor rolling update"));
+    // Counter (proportional) sits outside the monospace pill: (2/2) `name`.
+    assert.ok(allText(card.blocks).includes("(2/2) `Monitor rolling update`"));
   });
 
   it("detailed: shows the failed step beside a failed job", () => {
@@ -232,7 +232,7 @@ describe("renderCard (Slack Block Kit)", () => {
       ],
     });
     const card = renderCard([watched([job], "Tests")], fakeRun(), "o/r");
-    assert.ok(allText(card.blocks).includes("(2/2) Run npx playwright test"));
+    assert.ok(allText(card.blocks).includes("(2/2) `Run npx playwright test`"));
   });
 
   it("detailed: counter uses step.number, so teardown gaps stay monotonic", () => {
@@ -249,7 +249,7 @@ describe("renderCard (Slack Block Kit)", () => {
       ],
     });
     const card = renderCard([watched([job], "Tests")], fakeRun(), "o/r");
-    assert.ok(allText(card.blocks).includes("(13/15) Post Run actions/checkout"));
+    assert.ok(allText(card.blocks).includes("(13/15) `Post Run actions/checkout`"));
   });
 
   it("shows the conclusion word for a skipped job, not `done`", () => {
@@ -330,6 +330,42 @@ describe("renderCard (Slack Block Kit)", () => {
     const card = renderCard([watched(rows, "Tests", true)], fakeRun(), "o/r");
     // ~1m elapsed since the earliest start and counting.
     assert.ok(/1m/.test(allText(card.blocks)), allText(card.blocks));
+  });
+
+  it("detailed: renders the step name in monospace (backticks)", () => {
+    const job = fakeJob({
+      status: "in_progress",
+      conclusion: null,
+      completed_at: null,
+      steps: [
+        { name: "Set up job", status: "completed", conclusion: "success", number: 1 },
+        { name: "Run build", status: "in_progress", conclusion: null, number: 2 },
+      ],
+    });
+    const card = renderCard([watched([job], "Build")], fakeRun(), "o/r");
+    assert.ok(allText(card.blocks).includes("(2/2) `Run build`"));
+  });
+
+  it("detailed: truncates a long step name to the no-wrap budget, keeping max text", () => {
+    const longName = "Run a really long auto-generated step name that overflows";
+    const job = fakeJob({
+      status: "in_progress",
+      conclusion: null,
+      completed_at: null,
+      steps: [
+        { name: "Set up job", status: "completed", conclusion: "success", number: 1 },
+        { name: longName, status: "in_progress", conclusion: null, number: 2 },
+      ],
+    });
+    const card = renderCard([watched([job], "Build")], fakeRun(), "o/r");
+    // Name truncated to 29 chars (28 + "…") inside the pill; counter outside.
+    // Assert the full expected string so we catch any change to what we keep.
+    const expectedName = longName.slice(0, 28) + "…"; // 29 chars
+    assert.equal(expectedName.length, 29);
+    assert.ok(
+      allText(card.blocks).includes(`(2/2) \`${expectedName}\``),
+      allText(card.blocks),
+    );
   });
 
   it("detailed: omits the counter while only the setup step exists", () => {
