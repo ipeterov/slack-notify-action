@@ -67093,6 +67093,29 @@ const UNKNOWN_EMOJI = "❓";
 // `needs:` on a job that hasn't finished yet, so GitHub hasn't materialized
 // the row. Semantically "waiting".
 const MISSING_EMOJI = "⏳";
+// Human-readable status word for a completed job's conclusion. Every conclusion
+// gets a word — we decode the emoji into text for all of them, so a passing job
+// reads `success` just as a skipped one reads `skipped`; the emoji shouldn't be
+// the only thing distinguishing pass from fail. (Previously everything that
+// lacked a duration fell back to `done`, which mislabelled skipped/cancelled.)
+const CONCLUSION_TEXT = {
+    success: "success",
+    failure: "failed",
+    cancelled: "cancelled",
+    skipped: "skipped",
+    timed_out: "timed out",
+    action_required: "action required",
+    neutral: "neutral",
+    stale: "stale",
+};
+// The conclusion word plus the duration when there is one — e.g.
+// `success  ·  4m 48s`, or just `skipped` for a job with no runtime. Unknown
+// conclusions fall back to the raw value so we never silently swallow a new
+// GitHub state; a null conclusion (shouldn't happen for completed) reads `done`.
+function completedStatus(conclusion, duration) {
+    const word = conclusion === null ? "done" : CONCLUSION_TEXT[conclusion] ?? conclusion;
+    return duration ? `${word}  ·  ${duration}` : word;
+}
 const TERMINAL_CONCLUSIONS = new Set([
     "success",
     "failure",
@@ -67287,7 +67310,7 @@ function detailedCol1(w, runUrl) {
         const url = r.html_url ?? runUrl;
         let status;
         if (r.status === "completed") {
-            status = durationBetween(r.started_at, r.completed_at) ?? "done";
+            status = completedStatus(r.conclusion, durationBetween(r.started_at, r.completed_at));
         }
         else if (r.status === "in_progress") {
             // Live per-job timer: now − started_at, ticking each poll. Falls back to

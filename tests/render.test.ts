@@ -252,6 +252,32 @@ describe("renderCard (Slack Block Kit)", () => {
     assert.ok(allText(card.blocks).includes("(13/15) Post Run actions/checkout"));
   });
 
+  it("shows the conclusion word for a skipped job, not `done`", () => {
+    const job = fakeJob({
+      conclusion: "skipped",
+      started_at: null,
+      completed_at: null,
+    });
+    const card = renderCard([watched([job], "Build")], fakeRun(), "o/r");
+    const text = allText(card.blocks);
+    assert.ok(text.includes("skipped"));
+    assert.ok(!text.includes("done"));
+  });
+
+  it("shows the conclusion word alongside the duration for a success", () => {
+    const card = renderCard([watched([fakeJob()], "Tests")], fakeRun(), "o/r");
+    const text = allText(card.blocks);
+    // Decoded for every conclusion, not just the non-success ones.
+    assert.ok(text.includes("success"));
+    assert.ok(text.includes("1m 30s"));
+  });
+
+  it("decodes a cancelled job's conclusion", () => {
+    const job = fakeJob({ conclusion: "cancelled" });
+    const card = renderCard([watched([job], "Deploy")], fakeRun(), "o/r");
+    assert.ok(allText(card.blocks).includes("cancelled"));
+  });
+
   it("matrix collapse counts combinations as N jobs (GitHub's wording)", () => {
     const rows = [
       fakeJob({ name: "Tests (3.11)" }),
