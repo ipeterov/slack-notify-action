@@ -67202,25 +67202,30 @@ function latestCompletion(rows) {
     }
     return latest;
 }
-// Wall-clock runtime of the *watched* jobs. We can't use GitHub's run duration:
-// our notify job is itself part of the run, so the run is never "finished"
-// while we're polling. We measure across the jobs we watch instead.
-//   start = earliest watched start (immune to our own scheduling delay)
-//   end   = latest watched completion once all watched jobs are terminal
-//           (frozen), otherwise `now` — which advances on each poll/update so
-//           the value ticks live while the pipeline runs.
-function workflowRuntime(watched) {
-    const rows = watched.flatMap((w) => w.rows);
+// Wall-clock runtime across a set of job rows:
+//   start = earliest row start (immune to our own scheduling delay)
+//   end   = latest row completion once every row is terminal (frozen),
+//           otherwise `now` — which advances each poll, so the value ticks live
+//           while rows are still running, then freezes at the final value.
+// Used both for the whole card (the title) and for a single collapsed matrix
+// (so a matrix reads exactly like any other job: ticks, then freezes).
+function rowsRuntime(rows) {
     const start = earliestStart(rows);
     if (start === null)
         return null;
-    const allTerminal = watched.length > 0 && watched.every((w) => allRowsTerminal(w));
+    const allTerminal = rows.length > 0 && rows.every(isTerminal);
     const end = allTerminal
         ? latestCompletion(rows)
         : Math.floor(Date.now() / 1000);
     if (end === null || end < start)
         return null;
     return formatDuration(end - start);
+}
+// Wall-clock runtime of all *watched* jobs, for the card title. We can't use
+// GitHub's run duration: our notify job is itself part of the run, so the run
+// is never "finished" while we're polling. We measure across watched rows.
+function workflowRuntime(watched) {
+    return rowsRuntime(watched.flatMap((w) => w.rows));
 }
 // Slack mrkdwn link: <url|text>. Escapes the text so a stray `>`/`<`/`&` or
 // a `|` in the label can't break out of the link syntax.
@@ -67298,13 +67303,18 @@ function detailedCol1(w, runUrl) {
     const failed = w.rows.filter((r) => r.status === "completed" && r.conclusion === "failure").length;
     const total = w.rows.length;
     const noun = total === 1 ? "job" : "jobs";
-    let summary;
+    let count;
     if (failed > 0)
-        summary = `${done}/${total} ${noun} done, ${failed} failed`;
+        count = `${done}/${total} ${noun} done, ${failed} failed`;
     else if (done < total)
-        summary = `${done}/${total} ${noun} done`;
+        count = `${done}/${total} ${noun} done`;
     else
-        summary = `${total} ${noun}`;
+        count = `${total} ${noun}`;
+    // Wall-clock runtime, just like a single job: ticks while combos run, freezes
+    // at earliest-start→latest-finish once all are done — i.e. how long the whole
+    // matrix blocked downstream jobs.
+    const runtime = rowsRuntime(w.rows);
+    const summary = runtime ? `${count}  ·  ${runtime}` : count;
     return {
         emoji: pickEmoji(agg.status, agg.conclusion),
         text: `${link(runUrl, w.label)}  ·  ${summary}`,

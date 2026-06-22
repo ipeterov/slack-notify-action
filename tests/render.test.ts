@@ -264,6 +264,48 @@ describe("renderCard (Slack Block Kit)", () => {
     assert.ok(!text.includes("combos"));
   });
 
+  it("matrix runtime freezes at earliest-start → latest-finish when done", () => {
+    // Combo A: 00:00:00 → 00:02:00 (2m). Combo B starts later, 00:00:30 →
+    // 00:03:30 (3m). Wall-clock = 00:00:00 → 00:03:30 = 3m 30s.
+    const rows = [
+      fakeJob({
+        name: "Tests (a)",
+        started_at: "2024-01-01T00:00:00Z",
+        completed_at: "2024-01-01T00:02:00Z",
+      }),
+      fakeJob({
+        name: "Tests (b)",
+        started_at: "2024-01-01T00:00:30Z",
+        completed_at: "2024-01-01T00:03:30Z",
+      }),
+    ];
+    const card = renderCard([watched(rows, "Tests", true)], fakeRun(), "o/r");
+    assert.ok(allText(card.blocks).includes("3m 30s"), allText(card.blocks));
+  });
+
+  it("matrix runtime ticks live while combos are still running", () => {
+    const startedAt = new Date(Date.now() - 65_000).toISOString(); // 65s ago
+    const rows = [
+      // Combo A finished; combo B still running. Both started ~65s ago, so
+      // wall-clock (earliest start → now) is ~1m and counting.
+      fakeJob({
+        name: "Tests (a)",
+        started_at: startedAt,
+        completed_at: new Date(Date.now() - 5_000).toISOString(),
+      }),
+      fakeJob({
+        name: "Tests (b)",
+        status: "in_progress",
+        conclusion: null,
+        started_at: startedAt,
+        completed_at: null,
+      }),
+    ];
+    const card = renderCard([watched(rows, "Tests", true)], fakeRun(), "o/r");
+    // ~1m elapsed since the earliest start and counting.
+    assert.ok(/1m/.test(allText(card.blocks)), allText(card.blocks));
+  });
+
   it("detailed: no step line for a successful job", () => {
     const job = fakeJob({
       steps: [
