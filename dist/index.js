@@ -67252,6 +67252,11 @@ function escapeText(text) {
 // `(13/15)`, never "past the end" the way an array-position counter would after
 // it already showed the last real step. We show the step name verbatim,
 // including GitHub's auto `Run <cmd>` label for unnamed steps.
+//
+// While a job is still spinning up, GitHub reports just one step ("Set up job",
+// which is where it expands the matrix and resolves the real step list). A
+// `(1/1) Set up job` counter is misleading — it'll jump to `(2/37)` the moment
+// the rest materialize — so we omit the counter when there's only one step.
 function currentStep(job) {
     const steps = job.steps;
     if (!steps || steps.length === 0)
@@ -67266,6 +67271,8 @@ function currentStep(job) {
     if (!step)
         return null;
     const total = Math.max(...steps.map((s) => s.number));
+    if (total <= 1)
+        return step.name;
     return `(${step.number}/${total}) ${step.name}`;
 }
 // Detailed layout, col1: `<emoji> <bold job name → logs link> · <status/timer>`.

@@ -306,6 +306,23 @@ describe("renderCard (Slack Block Kit)", () => {
     assert.ok(/1m/.test(allText(card.blocks)), allText(card.blocks));
   });
 
+  it("detailed: omits the counter while only the setup step exists", () => {
+    // Spin-up: GitHub reports a single "Set up job" step before the real list
+    // materializes. `(1/1)` would be misleading, so show the name bare.
+    const job = fakeJob({
+      status: "in_progress",
+      conclusion: null,
+      completed_at: null,
+      steps: [
+        { name: "Set up job", status: "in_progress", conclusion: null, number: 1 },
+      ],
+    });
+    const card = renderCard([watched([job], "Tests")], fakeRun(), "o/r");
+    const text = allText(card.blocks);
+    assert.ok(text.includes("Set up job"));
+    assert.ok(!text.includes("(1/1)"));
+  });
+
   it("detailed: no step line for a successful job", () => {
     const job = fakeJob({
       steps: [
