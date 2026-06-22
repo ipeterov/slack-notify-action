@@ -67214,13 +67214,18 @@ function escapeText(text) {
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;");
 }
-// The step worth surfacing for a single-row job:
+// The step worth surfacing for a single-row job, prefixed with a position
+// counter `(x/y)`:
 //   - failed job   → the step that failed (what broke)
 //   - running job  → the step currently executing (what's happening now)
 // Returns null when there's no steps array, no matching step, or the job is in
 // any other state (done/queued — a step line would just be noise there).
-// We show the step name verbatim — exactly as GitHub does, including its
-// auto-generated `Run <cmd>` label for unnamed steps.
+// x/y use GitHub's own `step.number` (x = the surfaced step's number, y = the
+// highest step number on the job). GitHub's auto-injected teardown steps get
+// high numbers, so the counter stays monotonic — a running teardown reads
+// `(13/15)`, never "past the end" the way an array-position counter would after
+// it already showed the last real step. We show the step name verbatim,
+// including GitHub's auto `Run <cmd>` label for unnamed steps.
 function currentStep(job) {
     const steps = job.steps;
     if (!steps || steps.length === 0)
@@ -67232,7 +67237,10 @@ function currentStep(job) {
     else if (job.status === "in_progress") {
         step = steps.find((s) => s.status === "in_progress");
     }
-    return step?.name ?? null;
+    if (!step)
+        return null;
+    const total = Math.max(...steps.map((s) => s.number));
+    return `(${step.number}/${total}) ${step.name}`;
 }
 // Detailed layout, col1: `<emoji> <bold job name → logs link> · <status/timer>`.
 // The job name itself is the logs link, so there's no separate `logs ↗︎` —

@@ -219,7 +219,8 @@ describe("renderCard (Slack Block Kit)", () => {
       ],
     });
     const card = renderCard([watched([job], "Deploy")], fakeRun(), "o/r");
-    assert.ok(allText(card.blocks).includes("Monitor rolling update"));
+    // Counter uses step.number / max(step.number): (2/2) here.
+    assert.ok(allText(card.blocks).includes("(2/2) Monitor rolling update"));
   });
 
   it("detailed: shows the failed step beside a failed job", () => {
@@ -231,7 +232,24 @@ describe("renderCard (Slack Block Kit)", () => {
       ],
     });
     const card = renderCard([watched([job], "Tests")], fakeRun(), "o/r");
-    assert.ok(allText(card.blocks).includes("Run npx playwright test"));
+    assert.ok(allText(card.blocks).includes("(2/2) Run npx playwright test"));
+  });
+
+  it("detailed: counter uses step.number, so teardown gaps stay monotonic", () => {
+    // Real GitHub numbering: work steps 1–7, then teardown jumps to 13–15.
+    // A running teardown must read (13/15), never past-the-end.
+    const job = fakeJob({
+      status: "in_progress",
+      conclusion: null,
+      completed_at: null,
+      steps: [
+        { name: "Run npm test", status: "completed", conclusion: "success", number: 7 },
+        { name: "Post Run actions/checkout", status: "in_progress", conclusion: null, number: 13 },
+        { name: "Complete job", status: "queued", conclusion: null, number: 15 },
+      ],
+    });
+    const card = renderCard([watched([job], "Tests")], fakeRun(), "o/r");
+    assert.ok(allText(card.blocks).includes("(13/15) Post Run actions/checkout"));
   });
 
   it("detailed: no step line for a successful job", () => {
