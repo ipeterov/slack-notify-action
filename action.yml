@@ -37,6 +37,13 @@ inputs:
                    when you have many jobs and don't need step detail.
     required: false
     default: detailed
+  poll_interval:
+    description: |
+      How often to poll GitHub for run/job updates, in seconds. Minimum 1.
+      Defaults to 5. Lower values update the card sooner at the cost of more
+      API calls (and a higher chance of hitting rate limits).
+    required: false
+    default: "5"
   github-token:
     description: |
       GitHub token used to read the workflow run and its jobs. Defaults to the

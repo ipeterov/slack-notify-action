@@ -3,15 +3,14 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { GitHubClient } from "./github.js";
 import type { Job, Run } from "./github.js";
-import { parseJobsInput } from "./inputs.js";
+import { parseJobsInput, parseLayout, parsePollInterval } from "./inputs.js";
 import { matchJobs } from "./match.js";
 import { allRowsTerminal, failedWatched, renderCard } from "./render.js";
-import type { Card, Layout, WatchedJob } from "./render.js";
+import type { Card, WatchedJob } from "./render.js";
 import { SlackClient } from "./slack.js";
 import { parseWorkflow } from "./workflow.js";
 import type { JobMeta } from "./workflow.js";
 
-const POLL_INTERVAL_MS = 5_000;
 const MAX_POLL_DURATION_MS = 6 * 60 * 60 * 1_000;
 
 async function main(): Promise<void> {
@@ -22,6 +21,7 @@ async function main(): Promise<void> {
   // to GitHub's run number inside renderCard.
   const buildNumber = core.getInput("build_number").trim() || undefined;
   const layout = parseLayout(core.getInput("layout"));
+  const pollIntervalMs = parsePollInterval(core.getInput("poll_interval"));
   const token =
     core.getInput("github-token") || process.env.GITHUB_TOKEN || "";
 
@@ -78,7 +78,7 @@ async function main(): Promise<void> {
         reportWatchedFailures(watched);
         return;
       }
-      await sleep(POLL_INTERVAL_MS);
+      await sleep(pollIntervalMs);
 
       let nextRun: typeof run;
       let nextJobs: Job[];
@@ -117,15 +117,6 @@ async function main(): Promise<void> {
   } finally {
     await Promise.all([gh.close(), slack.close()]);
   }
-}
-
-function parseLayout(raw: string): Layout {
-  const v = raw.trim().toLowerCase();
-  if (v === "" || v === "detailed") return "detailed";
-  if (v === "compact") return "compact";
-  throw new Error(
-    `Invalid \`layout\`: '${raw}'. Expected 'detailed' or 'compact'.`,
-  );
 }
 
 function requireEnv(name: string): string {

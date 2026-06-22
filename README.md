@@ -56,6 +56,7 @@ terminal state.
 | `jobs`         | yes      | Job ids to watch, in the same form `needs:` accepts. Accepts a scalar, a flow list, or a block list. |
 | `layout`       | no       | `detailed` (default) or `compact`. See [Card layout](#card-layout). |
 | `build_number` | no       | Your own build number for the title (`build #…`). Defaults to GitHub's run number. |
+| `poll_interval`| no       | How often to poll GitHub for updates, in seconds. Minimum `1`, default `5`. |
 | `github-token` | no       | Token to read the run and its jobs. Defaults to `${{ github.token }}`, which only needs `actions: read`. |
 
 The bot token is read from the **`SLACK_BOT_TOKEN` environment variable**, not an

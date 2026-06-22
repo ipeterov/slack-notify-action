@@ -66808,7 +66808,6 @@ const match_js_1 = __nccwpck_require__(4954);
 const render_js_1 = __nccwpck_require__(7055);
 const slack_js_1 = __nccwpck_require__(6691);
 const workflow_js_1 = __nccwpck_require__(2986);
-const POLL_INTERVAL_MS = 5_000;
 const MAX_POLL_DURATION_MS = 6 * 60 * 60 * 1_000;
 async function main() {
     const channel = core.getInput("channel_id", { required: true });
@@ -66817,7 +66816,8 @@ async function main() {
     // Optional caller-supplied build number for the card title. Empty → fall back
     // to GitHub's run number inside renderCard.
     const buildNumber = core.getInput("build_number").trim() || undefined;
-    const layout = parseLayout(core.getInput("layout"));
+    const layout = (0, inputs_js_1.parseLayout)(core.getInput("layout"));
+    const pollIntervalMs = (0, inputs_js_1.parsePollInterval)(core.getInput("poll_interval"));
     const token = core.getInput("github-token") || process.env.GITHUB_TOKEN || "";
     // Read the bot token from the environment exactly as ivelum does, so swapping
     // actions needs no Slack-admin or secret changes.
@@ -66857,7 +66857,7 @@ async function main() {
                 reportWatchedFailures(watched);
                 return;
             }
-            await (0, promises_1.setTimeout)(POLL_INTERVAL_MS);
+            await (0, promises_1.setTimeout)(pollIntervalMs);
             let nextRun;
             let nextJobs;
             try {
@@ -66896,14 +66896,6 @@ async function main() {
     finally {
         await Promise.all([gh.close(), slack.close()]);
     }
-}
-function parseLayout(raw) {
-    const v = raw.trim().toLowerCase();
-    if (v === "" || v === "detailed")
-        return "detailed";
-    if (v === "compact")
-        return "compact";
-    throw new Error(`Invalid \`layout\`: '${raw}'. Expected 'detailed' or 'compact'.`);
 }
 function requireEnv(name) {
     const v = process.env[name];
@@ -66987,8 +66979,37 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.parseLayout = parseLayout;
+exports.parsePollInterval = parsePollInterval;
 exports.parseJobsInput = parseJobsInput;
 const yaml = __importStar(__nccwpck_require__(4281));
+const DEFAULT_POLL_INTERVAL_MS = 5_000;
+const MIN_POLL_INTERVAL_MS = 1_000;
+function parseLayout(raw) {
+    const v = raw.trim().toLowerCase();
+    if (v === "" || v === "detailed")
+        return "detailed";
+    if (v === "compact")
+        return "compact";
+    throw new Error(`Invalid \`layout\`: '${raw}'. Expected 'detailed' or 'compact'.`);
+}
+// Poll interval in seconds (e.g. `10`). Empty → the 5s default. Must be a
+// finite number ≥ 1s — polling faster than that risks GitHub rate limits and
+// buys little, since job state rarely changes sub-second.
+function parsePollInterval(raw) {
+    const v = raw.trim();
+    if (v === "")
+        return DEFAULT_POLL_INTERVAL_MS;
+    const seconds = Number(v);
+    if (!Number.isFinite(seconds)) {
+        throw new Error(`Invalid \`poll_interval\`: '${raw}'. Expected a number of seconds.`);
+    }
+    const ms = Math.round(seconds * 1_000);
+    if (ms < MIN_POLL_INTERVAL_MS) {
+        throw new Error(`\`poll_interval\` must be at least 1 second, got '${raw}'.`);
+    }
+    return ms;
+}
 function parseJobsInput(raw) {
     const trimmed = raw.trim();
     if (!trimmed) {
