@@ -67290,18 +67290,21 @@ function detailedCol1(w, runUrl) {
             text: `${link(url, w.label)}  ·  ${status}`,
         };
     }
-    // Matrix/reusable: keep the collapsed combo summary, name links to the run.
+    // Matrix/reusable: collapse the rows into one summary line. GitHub calls each
+    // matrix combination a "job" ("the workflow will run six jobs, one for each
+    // combination"), so we count "N jobs". The name links to the run.
     const agg = aggregateState(w.rows);
     const done = w.rows.filter((r) => r.status === "completed").length;
     const failed = w.rows.filter((r) => r.status === "completed" && r.conclusion === "failure").length;
     const total = w.rows.length;
+    const noun = total === 1 ? "job" : "jobs";
     let summary;
     if (failed > 0)
-        summary = `${done}/${total} done, ${failed} failed`;
+        summary = `${done}/${total} ${noun} done, ${failed} failed`;
     else if (done < total)
-        summary = `${done}/${total} done`;
+        summary = `${done}/${total} ${noun} done`;
     else
-        summary = `${total} combos`;
+        summary = `${total} ${noun}`;
     return {
         emoji: pickEmoji(agg.status, agg.conclusion),
         text: `${link(runUrl, w.label)}  ·  ${summary}`,

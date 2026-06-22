@@ -252,6 +252,18 @@ describe("renderCard (Slack Block Kit)", () => {
     assert.ok(allText(card.blocks).includes("(13/15) Post Run actions/checkout"));
   });
 
+  it("matrix collapse counts combinations as N jobs (GitHub's wording)", () => {
+    const rows = [
+      fakeJob({ name: "Tests (3.11)" }),
+      fakeJob({ name: "Tests (3.12)" }),
+      fakeJob({ name: "Tests (3.13)" }),
+    ];
+    const card = renderCard([watched(rows, "Tests", true)], fakeRun(), "o/r");
+    const text = allText(card.blocks);
+    assert.ok(text.includes("3 jobs"));
+    assert.ok(!text.includes("combos"));
+  });
+
   it("detailed: no step line for a successful job", () => {
     const job = fakeJob({
       steps: [
