@@ -28,6 +28,15 @@ inputs:
       example when an offset is applied after renaming a workflow. When unset,
       the card falls back to GitHub's run number (`run #<run_number>`).
     required: false
+  layout:
+    description: |
+      Card layout: `detailed` (default) or `compact`.
+        detailed — one job per row, with the current/failed step shown beside
+                   each in-progress or failed job. Best for a handful of jobs.
+        compact  — jobs packed into a dense 2-column grid, no step line. Use
+                   when you have many jobs and don't need step detail.
+    required: false
+    default: detailed
   github-token:
     description: |
       GitHub token used to read the workflow run and its jobs. Defaults to the

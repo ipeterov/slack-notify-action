@@ -29,6 +29,13 @@ export interface Run {
   } | null;
 }
 
+export interface Step {
+  name: string;
+  status: string | null;
+  conclusion: string | null;
+  number: number;
+}
+
 export interface Job {
   id: number;
   name: string;
@@ -38,6 +45,7 @@ export interface Job {
   started_at: string | null;
   completed_at: string | null;
   labels: string[];
+  steps?: Step[];
 }
 
 export class GitHubClient {

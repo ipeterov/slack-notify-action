@@ -123,11 +123,12 @@ describe("renderCard (Slack Block Kit)", () => {
     assert.ok(!text.includes("](")); // no Markdown links leaked in
   });
 
-  it("uses mrkdwn bold *label*, not Markdown **label**", () => {
+  it("links the job name to its logs in mrkdwn <url|text> form", () => {
     const card = renderCard([watched([fakeJob()], "Linters")], fakeRun(), "o/r");
     const text = allText(card.blocks);
-    assert.ok(text.includes("*Linters*"));
-    assert.ok(!text.includes("**Linters**"));
+    // The job name is the logs link, not a separate `logs ↗︎`.
+    assert.ok(text.includes("|Linters>"));
+    assert.ok(!text.includes("logs"));
   });
 
   it("does not enable channel pings from commit/job text", () => {
@@ -175,7 +176,7 @@ describe("renderCard (Slack Block Kit)", () => {
       fakeRun(),
       "o/r",
       false,
-      "fields",
+      "detailed",
       "6128",
     );
     const text = allText(card.blocks);
@@ -183,7 +184,7 @@ describe("renderCard (Slack Block Kit)", () => {
     assert.ok(!text.includes("run #42"));
   });
 
-  it("auto layout: ≤5 jobs use one section, 2 fields per job", () => {
+  it("detailed (default): ≤5 jobs use one section, 2 fields per job", () => {
     const jobs = Array.from({ length: 5 }, (_, i) =>
       watched([fakeJob()], `Job ${i}`),
     );
@@ -193,35 +194,91 @@ describe("renderCard (Slack Block Kit)", () => {
     assert.equal((sections[0]!["fields"] as unknown[]).length, 10); // 5 × 2
   });
 
-  it("auto layout: 6–10 jobs use one columns section, 1 field per job", () => {
+  it("detailed: >5 jobs chunk into further 5-job sections", () => {
     const jobs = Array.from({ length: 6 }, (_, i) =>
       watched([fakeJob()], `Job ${i}`),
     );
-    const card = renderCard(jobs, fakeRun(), "o/r");
+    const card = renderCard(jobs, fakeRun(), "o/r", false, "detailed");
     const sections = card.blocks.filter((b) => b["type"] === "section");
-    assert.equal(sections.length, 1); // no inter-section gap
-    assert.equal((sections[0]!["fields"] as unknown[]).length, 6); // 6 × 1
+    assert.equal(sections.length, 2); // 5 + 1
+    const total = sections.reduce(
+      (n, s) => n + (s["fields"] as unknown[]).length,
+      0,
+    );
+    assert.equal(total, 12); // 6 jobs × 2 fields
   });
 
-  it("columns layout fills column-major (A D / B E / C F), not row-major", () => {
+  it("detailed: shows the running step beside an in-progress job", () => {
+    const job = fakeJob({
+      status: "in_progress",
+      conclusion: null,
+      completed_at: null,
+      steps: [
+        { name: "Set up job", status: "completed", conclusion: "success", number: 1 },
+        { name: "Monitor rolling update", status: "in_progress", conclusion: null, number: 2 },
+      ],
+    });
+    const card = renderCard([watched([job], "Deploy")], fakeRun(), "o/r");
+    assert.ok(allText(card.blocks).includes("Monitor rolling update"));
+  });
+
+  it("detailed: shows the failed step beside a failed job", () => {
+    const job = fakeJob({
+      conclusion: "failure",
+      steps: [
+        { name: "Run npm ci", status: "completed", conclusion: "success", number: 1 },
+        { name: "Run npx playwright test", status: "completed", conclusion: "failure", number: 2 },
+      ],
+    });
+    const card = renderCard([watched([job], "Tests")], fakeRun(), "o/r");
+    assert.ok(allText(card.blocks).includes("Run npx playwright test"));
+  });
+
+  it("detailed: no step line for a successful job", () => {
+    const job = fakeJob({
+      steps: [
+        { name: "Run npm test", status: "completed", conclusion: "success", number: 1 },
+      ],
+    });
+    const card = renderCard([watched([job], "Tests")], fakeRun(), "o/r");
+    // A completed-success job surfaces no step; col2 is the blank placeholder.
+    assert.ok(!allText(card.blocks).includes("Run npm test"));
+  });
+
+  it("compact: 1 field per job, no step line", () => {
+    const job = fakeJob({
+      status: "in_progress",
+      conclusion: null,
+      completed_at: null,
+      steps: [
+        { name: "Monitor rolling update", status: "in_progress", conclusion: null, number: 1 },
+      ],
+    });
+    const card = renderCard([watched([job], "Deploy")], fakeRun(), "o/r", false, "compact");
+    const sections = card.blocks.filter((b) => b["type"] === "section");
+    assert.equal((sections[0]!["fields"] as unknown[]).length, 1); // 1 × 1
+    assert.ok(!allText(card.blocks).includes("Monitor rolling update"));
+  });
+
+  it("compact: fills column-major (A D / B E / C F), not row-major", () => {
     const labels = ["A", "B", "C", "D", "E", "F"];
     const jobs = labels.map((l) => watched([fakeJob()], l));
-    const card = renderCard(jobs, fakeRun(), "o/r");
+    const card = renderCard(jobs, fakeRun(), "o/r", false, "compact");
     const section = card.blocks.find((b) => b["type"] === "section")!;
     const order = (section["fields"] as Array<{ text: string }>).map((f) =>
-      // pull the bold label out of `:emoji: *Label* · …`
-      f.text.replace(/^[^*]*\*([^*]+)\*.*$/, "$1"),
+      // pull the linked label out of `:emoji: <url|Label> · …`
+      f.text.replace(/^.*\|([^>]+)>.*$/, "$1"),
     );
     // Slack lays these row-major, so to read A,B,C down the left column and
     // D,E,F down the right, the field array must be A,D,B,E,C,F.
     assert.deepEqual(order, ["A", "D", "B", "E", "C", "F"]);
   });
 
-  it("auto layout: >10 jobs chunk into multiple columns sections", () => {
+  it("compact: >10 jobs chunk into multiple sections", () => {
     const jobs = Array.from({ length: 11 }, (_, i) =>
       watched([fakeJob()], `Job ${i}`),
     );
-    const card = renderCard(jobs, fakeRun(), "o/r");
+    const card = renderCard(jobs, fakeRun(), "o/r", false, "compact");
     const sections = card.blocks.filter((b) => b["type"] === "section");
     assert.equal(sections.length, 2); // 10 + 1
     const total = sections.reduce(

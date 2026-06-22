@@ -54,6 +54,7 @@ terminal state.
 |----------------|----------|-------------|
 | `channel_id`   | yes      | Slack channel ID (e.g. `C0123456789`). Channel **names** are not supported — see below. |
 | `jobs`         | yes      | Job ids to watch, in the same form `needs:` accepts. Accepts a scalar, a flow list, or a block list. |
+| `layout`       | no       | `detailed` (default) or `compact`. See [Card layout](#card-layout). |
 | `github-token` | no       | Token to read the run and its jobs. Defaults to `${{ github.token }}`, which only needs `actions: read`. |
 
 The bot token is read from the **`SLACK_BOT_TOKEN` environment variable**, not an
@@ -125,19 +126,26 @@ combinations the matrix expands into.
 
 ## Card layout
 
-The card adapts its job list to the number of watched jobs, picking the
-clearest layout that fits Slack's block constraints (a section's `fields`
-array caps at 10 entries):
+Pick a layout with the `layout` input:
 
-- **Up to 5 jobs** — a two-column grid with the job name and its status/details
-  in separate columns.
-- **6 to 10 jobs** — a more compact two-column grid, one cell per job, so the
-  whole list still fits a single block with no visual gap.
-- **More than 10 jobs** — the compact grid continues across additional blocks.
-  A faint gap appears between blocks at this size; it's the trade-off for
-  keeping every job visible.
+- **`detailed`** (default) — one job per row. For each **in-progress** job the
+  card shows the step it's currently running, and for each **failed** job the
+  step that failed — so you can see what's actually happening or what broke
+  without opening the logs. The job name links to its logs, and a live timer
+  ticks beside running jobs. Best for a handful of jobs.
+- **`compact`** — jobs packed into a dense two-column grid with no step line.
+  Use this when you watch many jobs and don't need per-step detail.
 
-You don't configure this — it's chosen automatically from the `jobs:` count.
+```yaml
+with:
+  channel_id: C0123456789
+  jobs: [lint, test, deploy]
+  layout: compact
+```
+
+In both layouts a section's `fields` array caps at 10 entries, so long job
+lists chunk across additional blocks (with a faint gap between them) to keep
+every job visible.
 
 ## Migrating from `ivelum/github-action-slack-notify-build`
 

@@ -6,7 +6,7 @@ import type { Job, Run } from "./github.js";
 import { parseJobsInput } from "./inputs.js";
 import { matchJobs } from "./match.js";
 import { allRowsTerminal, failedWatched, renderCard } from "./render.js";
-import type { Card, WatchedJob } from "./render.js";
+import type { Card, Layout, WatchedJob } from "./render.js";
 import { SlackClient } from "./slack.js";
 import { parseWorkflow } from "./workflow.js";
 import type { JobMeta } from "./workflow.js";
@@ -21,6 +21,7 @@ async function main(): Promise<void> {
   // Optional caller-supplied build number for the card title. Empty → fall back
   // to GitHub's run number inside renderCard.
   const buildNumber = core.getInput("build_number").trim() || undefined;
+  const layout = parseLayout(core.getInput("layout"));
   const token =
     core.getInput("github-token") || process.env.GITHUB_TOKEN || "";
 
@@ -62,7 +63,7 @@ async function main(): Promise<void> {
     // Bind the build-number override (and the default layout) once so the poll
     // loop's render calls stay terse.
     const render = (w: WatchedJob[], r: Run, monitoringError?: boolean): Card =>
-      renderCard(w, r, repo, monitoringError, "auto", buildNumber);
+      renderCard(w, r, repo, monitoringError, layout, buildNumber);
 
     const watched = buildWatched(watchedIds, meta, jobs);
     const card = render(watched, run);
@@ -116,6 +117,15 @@ async function main(): Promise<void> {
   } finally {
     await Promise.all([gh.close(), slack.close()]);
   }
+}
+
+function parseLayout(raw: string): Layout {
+  const v = raw.trim().toLowerCase();
+  if (v === "" || v === "detailed") return "detailed";
+  if (v === "compact") return "compact";
+  throw new Error(
+    `Invalid \`layout\`: '${raw}'. Expected 'detailed' or 'compact'.`,
+  );
 }
 
 function requireEnv(name: string): string {
